@@ -1,0 +1,16 @@
+{
+  "name": "rentlease",
+  "title": "장기렌트 리스 할부 비교 계산기 - 월 납입금·총비용",
+  "description": "차량 가격과 기간만 넣으면 장기렌트, 운용리스, 할부의 월 납입금과 총비용, 실질 비용을 한 번에 비교해 드려요. 보험료·자동차세·취득세까지 반영한 무료 계산기.",
+  "eyebrow": "무료 · 회원가입 없음",
+  "headline_1": "장기렌트·리스·할부,",
+  "headline_2": "뭐가 제일 쌀까?",
+  "tagline": "차값과 기간만 넣으면 방식별 총비용이 나와요.",
+  "og_chips": ["월 납입금", "총비용 비교", "보험·세금 포함"],
+  "og_colors": { "bg": "#f1f2fb", "accent": "#4f46e5", "accent_soft": "#eef2ff", "accent_text": "#4338ca" },
+  "offers_title": "렌트·리스 견적 모음",
+  "offer_categories": ["quote", "car"],
+  "goatcounter": "rentlease",
+  "google_verification": "mM9h9M-RD--eig_kQoxlpfIkTL-EmWw2WRh2go4-hyg",
+  "naver_verification": ""
+}

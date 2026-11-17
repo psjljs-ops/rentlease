@@ -1,0 +1,160 @@
+"""site.json 을 읽어 dist/ 폴더에 배포할 사이트를 만듭니다.
+
+사용법:  python tools/build.py
+
+만드는 것
+  dist/index.html, offers.html, 404.html   {{...}} 자리 채움 + SEO·통계·확인 태그 삽입
+  dist/og.png                             공유 미리보기 이미지 (1200x630)
+  dist/sitemap.xml, robots.txt
+  dist.zip                                Cloudflare 대시보드 '파일 끌어서 놓기' 업로드용
+
+주의: Cloudflare Pages 는 /offers.html 을 /offers 로 바꿔 보여 줍니다.
+      그래서 내부 링크와 sitemap 은 확장자 없는 주소를 씁니다.
+"""
+import datetime
+import html
+import json
+import pathlib
+import shutil
+import zipfile
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+SRC, DIST = ROOT / "src", ROOT / "dist"
+cfg = json.loads((ROOT / "site.json").read_text(encoding="utf-8"))
+
+URL = f"https://{cfg['name']}.pages.dev"
+TODAY = datetime.date.today().isoformat()
+e = lambda s: html.escape(str(s), quote=True)
+
+
+def ld_json(src_html, title, desc):
+    """메인 페이지용 구조화 데이터: 무료 웹 도구(WebApplication) + 자주 묻는 질문(FAQPage)."""
+    import re
+    blocks = [{
+        "@context": "https://schema.org", "@type": "WebApplication", "name": cfg["title"].split(" - ")[0],
+        "url": URL + "/", "description": desc, "inLanguage": "ko", "applicationCategory": "LifestyleApplication",
+        "operatingSystem": "Any", "isAccessibleForFree": True,
+        "offers": {"@type": "Offer", "price": "0", "priceCurrency": "KRW"},
+    }]
+    qa = re.findall(r"<details><summary>(.*?)</summary><p>(.*?)</p></details>", src_html, re.S)
+    if qa:
+        strip = lambda x: re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", x)).strip()
+        blocks.append({"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
+            {"@type": "Question", "name": strip(q), "acceptedAnswer": {"@type": "Answer", "text": strip(a)}} for q, a in qa]})
+    return "\n".join('<script type="application/ld+json">' + json.dumps(b, ensure_ascii=False) + "</script>" for b in blocks)
+
+
+def seo_block(path, title, desc):
+    lines = [
+        f'<meta name="description" content="{e(desc)}">',
+        f'<link rel="canonical" href="{URL}{path}">',
+        '<meta property="og:type" content="website">',
+        f'<meta property="og:title" content="{e(title)}">',
+        f'<meta property="og:description" content="{e(desc)}">',
+        f'<meta property="og:url" content="{URL}{path}">',
+        f'<meta property="og:image" content="{URL}/og.png">',
+        '<meta property="og:image:width" content="1200">',
+        '<meta property="og:image:height" content="630">',
+        '<meta property="og:locale" content="ko_KR">',
+        '<meta name="twitter:card" content="summary_large_image">',
+    ]
+    if path == "/":  # 서치콘솔·서치어드바이저 확인 태그는 메인에만
+        if cfg.get("google_verification"):
+            lines.append(f'<meta name="google-site-verification" content="{e(cfg["google_verification"])}">')
+        if cfg.get("naver_verification"):
+            lines.append(f'<meta name="naver-site-verification" content="{e(cfg["naver_verification"])}">')
+    if cfg.get("goatcounter"):
+        lines.append(f'<script data-goatcounter="https://{e(cfg["goatcounter"])}.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>')
+    return "\n".join(lines)
+
+
+GUIDE_CARD = ""
+
+
+def render(name, path, title, desc):
+    s = (SRC / name).read_text(encoding="utf-8")
+    s = s.replace("<!--GUIDES-->", GUIDE_CARD)
+    values = {
+        "SITE_TITLE": cfg["title"], "OFFERS_TITLE": cfg["offers_title"],
+        "EYEBROW": cfg["eyebrow"], "HEADLINE_1": cfg["headline_1"], "HEADLINE_2": cfg["headline_2"],
+        "TAGLINE": cfg["tagline"],
+    }
+    for k, v in values.items():
+        s = s.replace("{{" + k + "}}", e(v))
+    left = [t for t in ("{{", "}}") if t in s]  # 구조화 데이터(JSON)를 넣기 전에 검사
+    if left:
+        raise SystemExit(f"{name}: 채워지지 않은 {{...}} 자리가 있습니다")
+    seo = seo_block(path, title, desc)
+    if path == "/":
+        seo += "\n" + ld_json(s, title, desc)
+    s = s.replace("<!--SEO-->", seo)
+    (DIST / name).write_text(s, encoding="utf-8")
+
+
+def make_og():
+    from PIL import Image, ImageDraw, ImageFont
+    W, H = 1200, 630
+    oc = {"bg": "#f2f4f6", "accent": "#3182f6", "accent_soft": "#e8f3ff", "accent_text": "#1b64da", **cfg.get("og_colors", {})}
+    im = Image.new("RGB", (W, H), oc["bg"])
+    d = ImageDraw.Draw(im)
+    F = lambda size, bold=True: ImageFont.truetype(
+        "C:/Windows/Fonts/malgunbd.ttf" if bold else "C:/Windows/Fonts/malgun.ttf", size)
+    d.rounded_rectangle((40, 40, W - 40, H - 40), 40, fill="#ffffff")
+    w = d.textlength(cfg["eyebrow"], font=F(26)) + 44
+    d.rounded_rectangle((100, 110, 100 + w, 160), 25, fill=oc["accent_soft"])
+    d.text((122, 116), cfg["eyebrow"], font=F(26), fill=oc["accent_text"])
+    d.text((100, 195), cfg["headline_1"], font=F(66), fill="#191f28")
+    d.text((100, 280), cfg["headline_2"], font=F(66), fill=oc["accent"])
+    d.text((100, 390), cfg["tagline"], font=F(30, False), fill="#4e5968")
+    x = 100
+    for chip in cfg.get("og_chips", [])[:4]:
+        w = d.textlength(chip, font=F(24)) + 40
+        d.rounded_rectangle((x, 460, x + w, 510), 25, fill=oc["bg"])
+        d.text((x + 20, 468), chip, font=F(24), fill="#4e5968")
+        x += w + 12
+    d.text((W - 100 - d.textlength(URL[8:], font=F(24, False)), 520), URL[8:], font=F(24, False), fill="#8b95a1")
+    im.save(DIST / "og.png", optimize=True)
+
+
+def main():
+    DIST.mkdir(exist_ok=True)
+    for f in DIST.iterdir():  # 폴더는 두고 안의 파일만 지움 (미리보기 서버가 폴더를 쓰고 있어도 됨)
+        shutil.rmtree(f) if f.is_dir() else f.unlink()
+
+    # 가이드 글 (/guide/...)
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT / "tools"))
+    import guides as G
+    oc = {"accent": "#3182f6", "accent_soft": "#e8f3ff", "accent_text": "#1b64da", **cfg.get("og_colors", {})}
+    global GUIDE_CARD
+    GUIDES = G.build(ROOT, DIST, {
+        "url": URL, "name": cfg["title"].split(" - ")[0], "theme": oc["accent"],
+        "colors": {"accent": oc["accent"], "soft": oc["accent_soft"], "text": oc["accent_text"]},
+        "index_html": (SRC / "index.html").read_text(encoding="utf-8"),
+        "footer": "이 글은 일반적인 정보를 정리한 참고 자료입니다. 제도와 기한은 관할 기관과 각 회사의 최신 안내를 확인해 주세요.",
+        "goatcounter": cfg.get("goatcounter", ""),
+    })
+    GUIDE_CARD = G.card(GUIDES)
+    render("index.html", "/", cfg["title"], cfg["description"])
+    render("offers.html", "/offers", f'{cfg["offers_title"]} | {cfg["title"]}', cfg["description"])
+    render("404.html", "/404", cfg["title"], cfg["description"])
+    make_og()
+
+    urls = [("/", "1.0"), ("/offers", "0.6")]
+    if GUIDES:
+        urls += [("/guide/", "0.7")] + [(f"/guide/{g['slug']}", "0.8") for g in GUIDES]
+    (DIST / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "".join(f"  <url><loc>{URL}{p}</loc><lastmod>{TODAY}</lastmod><priority>{pr}</priority></url>\n" for p, pr in urls)
+        + "</urlset>\n", encoding="utf-8")
+    (DIST / "robots.txt").write_text(f"User-agent: *\nAllow: /\n\nSitemap: {URL}/sitemap.xml\n", encoding="utf-8")
+
+    with zipfile.ZipFile(ROOT / "dist.zip", "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(DIST.rglob("*")):  # 하위 폴더(guide/ 등)까지 포함
+            if f.is_file():
+                z.write(f, f.relative_to(DIST).as_posix())
+    print(f"완료: {URL}  (dist/ {len(list(DIST.iterdir()))}개 파일, dist.zip)")
+
+
+if __name__ == "__main__":
+    main()
